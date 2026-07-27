@@ -31,6 +31,7 @@
     width: 100% !important;
     height: 100% !important;
     object-fit: cover;
+    transform: none !important;
   }
   #reader img { display: none !important; } /* skryje jejich info ikonku */
 
@@ -197,16 +198,20 @@ function startScanning() {
   html5QrCode = new Html5Qrcode("reader", /* verbose= */ false);
 
   const config = {
-    fps: 10,
+    fps: 15,
     qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
+      const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8);
       return { width: size, height: size };
     },
     aspectRatio: window.innerWidth / window.innerHeight
   };
 
   html5QrCode.start(
-    { facingMode: "user" },
+    {
+      facingMode: "user",
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    },
     config,
     (decodedText) => {
       onQrDetected(decodedText);
@@ -228,6 +233,22 @@ startBtn.addEventListener('click', () => {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
+  // iOS Safari vyžaduje "odemknutí" audia přímo v gestu uživatele –
+  // přehrajeme okamžitě tichý zvuk, aby pozdější beep() opravdu zahrál.
+  try {
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    const unlockOsc = audioCtx.createOscillator();
+    const unlockGain = audioCtx.createGain();
+    unlockGain.gain.value = 0;
+    unlockOsc.connect(unlockGain).connect(audioCtx.destination);
+    unlockOsc.start();
+    unlockOsc.stop(audioCtx.currentTime + 0.01);
+  } catch (e) {
+    console.warn('Nepodařilo se odemknout audio', e);
+  }
+
   startError.style.display = 'none';
   startScreen.style.display = 'none';
   startScanning();
