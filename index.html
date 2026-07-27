@@ -203,15 +203,16 @@ function startScanning() {
       const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.8);
       return { width: size, height: size };
     },
-    aspectRatio: window.innerWidth / window.innerHeight
-  };
-
-  html5QrCode.start(
-    {
+    aspectRatio: window.innerWidth / window.innerHeight,
+    videoConstraints: {
       facingMode: "user",
       width: { ideal: 1280 },
       height: { ideal: 720 }
-    },
+    }
+  };
+
+  html5QrCode.start(
+    { facingMode: "user" },
     config,
     (decodedText) => {
       onQrDetected(decodedText);
