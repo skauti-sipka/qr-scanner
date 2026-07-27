@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>QR Skener</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #111;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #app {
+    position: relative;
+    width: 100%; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color 0.15s ease;
+    background: #111;
+  }
+  #app.hit { background: #1db954; }
+
+  #reader {
+    width: 100%;
+    height: 100%;
+  }
+  /* html5-qrcode vkládá vlastní <video>/<canvas>, jen je vycentrujeme */
+  #reader video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+  }
+  #reader img { display: none !important; } /* skryje jejich info ikonku */
+
+  #overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: 16px;
+    text-align: center;
+    color: #fff;
+    z-index: 10;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    font-size: 15px;
+    pointer-events: none;
+  }
+  #status {
+    position: absolute;
+    top: 44px; left: 0; right: 0;
+    text-align: center;
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    z-index: 10;
+    pointer-events: none;
+  }
+  #result {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 20px;
+    text-align: center;
+    color: #fff;
+    background: rgba(0,0,0,0.55);
+    font-size: 16px;
+    word-break: break-all;
+    z-index: 10;
+    display: none;
+  }
+  #startScreen {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: #111;
+  }
+  #startBtn {
+    padding: 14px 28px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    background: #1db954;
+    color: white;
+    cursor: pointer;
+  }
+  #startError {
+    color: #ff6b6b;
+    font-size: 14px;
+    max-width: 80%;
+    text-align: center;
+    display: none;
+  }
+
+  #successOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: #1db954;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #successOverlay.show {
+    display: flex;
+  }
+  #successText {
+    color: #fff;
+    font-size: 72px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-align: center;
+    padding: 0 24px;
+  }
+  #successSub {
+    color: #fff;
+    font-size: 44px;
+    font-weight: 600;
+    word-break: break-all;
+    text-align: center;
+    padding: 0 24px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="overlay">Namiř kameru na QR kód</div>
+  <div id="status"></div>
+  <div id="reader"></div>
+
+  <div id="startScreen">
+    <button id="startBtn">Spustit kameru</button>
+    <div id="startError"></div>
+  </div>
+
+  <div id="successOverlay">
+    <div id="successText">Přihlášen</div>
+    <div id="successSub"></div>
+  </div>
+</div>
+
+<script>
+const app = document.getElementById('app');
+const overlay = document.getElementById('overlay');
+const statusBox = document.getElementById('status');
+const startScreen = document.getElementById('startScreen');
+const startBtn = document.getElementById('startBtn');
+const startError = document.getElementById('startError');
+const successOverlay = document.getElementById('successOverlay');
+const successSub = document.getElementById('successSub');
+
+let audioCtx = null;
+let lastValue = null;
+let lastHitTime = 0;
+const COOLDOWN_MS = 2000;
+const OVERLAY_DURATION_MS = 4000;
+
+function beep() {
+  try {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.35);
+  } catch (e) {
+    console.warn('Zvuk se nepodařilo přehrát', e);
+  }
+}
+
+function onQrDetected(value) {
+  const now = Date.now();
+  if (value === lastValue && now - lastHitTime < COOLDOWN_MS) return;
+  lastValue = value;
+  lastHitTime = now;
+
+  beep();
+  successSub.textContent = value;
+  successOverlay.classList.add('show');
+
+  setTimeout(() => successOverlay.classList.remove('show'), OVERLAY_DURATION_MS);
+}
+
+let html5QrCode;
+
+function startScanning() {
+  html5QrCode = new Html5Qrcode("reader", /* verbose= */ false);
+
+  const config = {
+    fps: 10,
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+      const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
+      return { width: size, height: size };
+    },
+    aspectRatio: window.innerWidth / window.innerHeight
+  };
+
+  html5QrCode.start(
+    { facingMode: "environment" },
+    config,
+    (decodedText) => {
+      onQrDetected(decodedText);
+    },
+    () => {
+      // volá se i při snímcích bez kódu — nic neděláme, jen udrží UI v klidu
+    }
+  ).then(() => {
+    overlay.textContent = 'Hledám QR kód...';
+    statusBox.textContent = 'Kamera aktivní';
+  }).catch((err) => {
+    startError.style.display = 'block';
+    startError.textContent = 'Nepodařilo se spustit kameru: ' + err;
+    startScreen.style.display = 'flex';
+  });
+}
+
+startBtn.addEventListener('click', () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  startError.style.display = 'none';
+  startScreen.style.display = 'none';
+  startScanning();
+});
+</script>
+</body>
+</html>
