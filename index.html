@@ -206,7 +206,7 @@ function startScanning() {
   };
 
   html5QrCode.start(
-    { facingMode: "environment" },
+    { facingMode: "user" },
     config,
     (decodedText) => {
       onQrDetected(decodedText);
